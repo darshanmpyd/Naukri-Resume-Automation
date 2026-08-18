@@ -73,6 +73,24 @@ def is_headless_requested():
     return is_linux_server or is_windows_server
 
 
+def get_chrome_binary_path():
+    """Find a usable Chrome/Chromium executable in server environments."""
+    candidates = [
+        os.getenv("GOOGLE_CHROME_BIN"),
+        os.getenv("CHROME_BIN"),
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+    ]
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def get_driver():
     """
     Open Chrome to load Naukri.com with predefined options.
@@ -84,6 +102,11 @@ def get_driver():
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-popups")
     options.add_argument("--disable-gpu")
+
+    chrome_binary = get_chrome_binary_path()
+    if chrome_binary:
+        logging.info(f"Using Chrome binary at: {chrome_binary}")
+        options.binary_location = chrome_binary
 
     if is_headless_requested():
         logging.info("Headless mode enabled for VM/server environment.")
@@ -97,10 +120,11 @@ def get_driver():
         else:
             options.add_argument("--kiosk")
 
-    # Initialize the Chrome driver with ChromeDriverManager
+    driver_path = os.getenv("CHROMEDRIVER_PATH")
+
     try:
-        driver = webdriver.Chrome(service=ChromeService(
-            ChromeDriverManager().install()), options=options)
+        service = ChromeService(driver_path) if driver_path else ChromeService(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
         logging.info("ChromeDriver launched")
     except Exception as e:
         logging.error(f"Error launching Chrome: {e}")

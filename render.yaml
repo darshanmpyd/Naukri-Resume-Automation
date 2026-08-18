@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: naukri-resume-updater
+    env: python
+    plan: free
+    buildCommand: |
+      apt-get update &&
+      apt-get install -y chromium chromium-driver &&
+      pip install --upgrade pip &&
+      export CARGO_HOME=/tmp/cargo &&
+      export RUSTUP_HOME=/tmp/rustup &&
+      mkdir -p /tmp/cargo &&
+      pip install -r requirements.txt
+    startCommand: python api.py
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: RUN_HEADLESS
+        value: "true"
+      - key: CHROME_BIN
+        value: /usr/bin/chromium
+      - key: CHROMEDRIVER_PATH
+        value: /usr/bin/chromedriver
