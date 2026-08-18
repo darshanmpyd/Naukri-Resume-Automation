@@ -103,8 +103,13 @@ def get_driver():
     options.add_argument("--disable-popups")
     options.add_argument("--disable-gpu")
     options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
+    options.add_experimental_option("prefs", {
+        "profile.managed_default_content_settings.images": 2,
+        "profile.default_content_setting_values.notifications": 2,
+    })
 
     chrome_binary = get_chrome_binary_path()
     if chrome_binary:
@@ -135,13 +140,20 @@ def get_driver():
 
     # Set implicit wait time
     driver.implicitly_wait(5)
+    driver.set_page_load_timeout(30)
 
     # Navigate to site
     try:
         driver.get(login_url)
         logging.info("Site loaded successfully")
+        logging.info(f"Page URL after load: {driver.current_url}")
+        logging.info(f"Page title after load: {driver.title}")
     except Exception as e:
         logging.error(f"Error loading site: {e}")
+        try:
+            logging.error(f"Current page source snippet: {driver.page_source[:500]}")
+        except Exception:
+            pass
         driver.quit()
         return None
 
