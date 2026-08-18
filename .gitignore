@@ -1,6 +1,3 @@
-.DS_Store
 .env
-.wdm/
-macos_script.sh
-resume/Resume.pdf
-venv/
+venv
+__pycache__

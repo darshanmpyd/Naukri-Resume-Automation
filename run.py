@@ -2,10 +2,12 @@
 import logging
 import os
 import platform
+import time
 
 from datetime import datetime
 from dotenv import load_dotenv
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
@@ -22,12 +24,12 @@ logging.basicConfig(
 )
 
 # Loading Environment Variable
-load_dotenv()
-username = os.getenv('USERNAME')
-password = os.getenv('PASSWORD')
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+username = (os.getenv('NAUKRI_USERNAME') or os.getenv('USERNAME') or '').strip()
+password = os.getenv('PASSWORD') or os.getenv('NAUKRI_PASSWORD')
 
 # Creating Resume path
-resume_path = os.path.abspath(os.path.join("resume", "Resume.pdf"))
+resume_path = os.path.abspath(os.path.join("resume", "Darshan_AI_Full Stack Developer.pdf"))
 
 # Login URL
 login_url = "https://www.naukri.com/nlogin/login"
@@ -55,6 +57,22 @@ locator_mapping = {
 }
 
 
+def is_headless_requested():
+    """Return True when the script should run Chrome in headless mode."""
+    value = os.getenv("RUN_HEADLESS", "").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+
+    # In a VM/server without a GUI, Chrome typically needs headless mode.
+    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    is_linux_server = platform.system() == "Linux" and not has_display
+    is_windows_server = platform.system() == "Windows" and os.environ.get("SESSIONNAME") is None
+
+    return is_linux_server or is_windows_server
+
+
 def get_driver():
     """
     Open Chrome to load Naukri.com with predefined options.
@@ -64,13 +82,20 @@ def get_driver():
     # Set Chrome options
     options = webdriver.ChromeOptions()
     options.add_argument("--disable-notifications")
-    if FULLSCREEN_FLAG:
-        if platform.system == "Windows":
+    options.add_argument("--disable-popups")
+    options.add_argument("--disable-gpu")
+
+    if is_headless_requested():
+        logging.info("Headless mode enabled for VM/server environment.")
+        options.add_argument("--headless=new")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--no-sandbox")
+    elif FULLSCREEN_FLAG:
+        if platform.system() == "Windows":
             options.add_argument("--start-maximized")
         else:
             options.add_argument("--kiosk")
-    options.add_argument("--disable-popups")
-    options.add_argument("--disable-gpu")
 
     # Initialize the Chrome driver with ChromeDriverManager
     try:
@@ -217,9 +242,9 @@ def login():
             logging.info("Login Successful")
             status = True
         else:
-            logging.warn("Login checkpoint not found. Automation may fail")
+            logging.warning("Login checkpoint not found. Automation may fail")
         return status, driver
-    except Exception('WebDriverException') as wd_err:
+    except WebDriverException as wd_err:
         logging.error(f"WebDriver Error during login: {wd_err}")
     except NoSuchElementException as no_elem_err:
         logging.error(f"Element not found during login: {no_elem_err}")
@@ -255,29 +280,47 @@ def upload_resume(driver, resume_path):
     # Constants for locators and URLs
     ATTACH_CV_ID = "attachCV"
     CHECKPOINT_XPATH = "//*[contains(@class, 'updateOn')]"
-    SAVE_BTN_XPATH = "//button[@type='button']"
+    SAVE_BTN_XPATH = "//button[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'save')]"
     CLOSE_BTN_XPATH = "//*[contains(@class, 'crossIcon')]"
     PROFILE_URL = "https://www.naukri.com/mnjuser/profile"
 
     try:
         driver.get(PROFILE_URL)
+        time.sleep(2)  # Let the page settle after navigation
 
         # Close any pop-ups if present
-        if wait_until_present(driver, CLOSE_BTN_XPATH, "XPATH", 1):
+        if wait_until_present(driver, CLOSE_BTN_XPATH, "XPATH", 3):
             close_btn = get_element(driver, CLOSE_BTN_XPATH, locator="XPATH")
             if close_btn:
                 close_btn.click()
+                time.sleep(1)
 
         # Wait for the attach CV input field and upload the resume
-        if wait_until_present(driver, ATTACH_CV_ID, locator="ID", timeout=GLOBAL_WAIT):
+        if wait_until_present(driver, ATTACH_CV_ID, locator="ID", timeout=10):
             attach_element = get_element(driver, ATTACH_CV_ID, locator="ID")
             attach_element.send_keys(resume_path)
+            logging.info("Resume file path sent to upload input.")
+            time.sleep(3)  # Wait for upload dialog / save button to appear
+        else:
+            logging.error("Attach CV input field not found on the profile page.")
+            return
 
         # Save the uploaded resume if the save button is present
-        if wait_until_present(driver, SAVE_BTN_XPATH, locator="XPATH", timeout=GLOBAL_WAIT):
+        if wait_until_present(driver, SAVE_BTN_XPATH, locator="XPATH", timeout=10):
             save_element = get_element(driver, SAVE_BTN_XPATH, locator="XPATH")
-            save_element.click()
-        check_last_update_status(driver, CHECKPOINT_XPATH, "XPATH", 3)
+            if save_element:
+                # Scroll into view and use JS click to bypass overlay/interactability issues
+                driver.execute_script("arguments[0].scrollIntoView(true);", save_element)
+                time.sleep(0.5)
+                driver.execute_script("arguments[0].click();", save_element)
+                logging.info("Save button clicked.")
+                time.sleep(3)  # Wait for save to complete
+            else:
+                logging.warning("Save button element could not be retrieved.")
+        else:
+            logging.warning("Save button not found after resume upload.")
+
+        check_last_update_status(driver, CHECKPOINT_XPATH, "XPATH", 5)
     except TimeoutException:
         logging.error("Timeout while waiting for elements during resume upload.")
     except Exception as e:
@@ -301,13 +344,14 @@ def clean_up(driver):
 
 def run_automation():
     logging.info('Starting Automation...')
+    driver = None
     try:
         status, driver = login()
         if status:
             if os.path.exists(resume_path):
                 upload_resume(driver, resume_path)
             else:
-                raise FileNotFoundError
+                raise FileNotFoundError(f"Resume not found at path: {resume_path}")
     except Exception as ex:
         logging.error(f"Automation Failed with exception: {ex}")
     finally:
