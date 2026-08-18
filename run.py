@@ -102,6 +102,9 @@ def get_driver():
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-popups")
     options.add_argument("--disable-gpu")
+    options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
 
     chrome_binary = get_chrome_binary_path()
     if chrome_binary:
@@ -235,13 +238,18 @@ def login():
             logging.error("Failed to load the browser.")
             return status, driver
 
-        # Verify if the website loaded correctly
-        if "naukri" not in driver.title.lower():
-            logging.error("Failed to load Naukri.com correctly.")
-            return status, driver
+        page_title = (driver.title or "").lower()
+        page_url = (driver.current_url or "").lower()
+
+        if "naukri" not in page_title and "naukri" not in page_url:
+            logging.warning(
+                "Title/URL does not look like the Naukri login page yet, continuing to check for login form fields. "
+                f"title={page_title!r}, url={page_url!r}"
+            )
         logging.info("Website Loaded Successfully.")
 
-        # Check and locate the login elements
+        # Check and locate the login elements. Some Naukri pages may redirect or render different titles
+        # in headless/server environments, but the login form still appears.
         if not is_element_present(driver, By.ID, USERNAME_LOCATOR):
             logging.error("Login elements not found. Unable to login.")
             return status, driver
